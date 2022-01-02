@@ -1,0 +1,8 @@
+########## ${filename} ##########
+CPU cycles:             ${mean_0}    (+-${std_0})
+Retired instructions:   ${mean_1}    (+-${std_1})
+Executed instructions:  ${mean_2}    (+-${std_2})
+Predicted branches:     ${mean_3}    (+-${std_3})
+Mispredicted branches:  ${mean_4}    (+-${std_4})
+Markers:                ${mean_5}    (+-${std_5})
+----------------------------------

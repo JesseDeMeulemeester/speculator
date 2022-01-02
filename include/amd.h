@@ -11,6 +11,9 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+//
+// 2022-01-02: Modified by Jesse De Meulemeester.
+//   - Added functions to read and reset all counters.
 
 #ifndef AMD_H
 #define AMD_H
@@ -42,6 +45,11 @@ void write_to_AMD_PMCi(int fd, uint8_t i, uint64_t val) {
     }
 }
 
+void reset_AMD_PMCs(int fd, int nb_counters) {
+    for (int i = 0; i < nb_counters; ++i)
+        write_to_AMD_PMCi(fd, i, 0ull);
+}
+
 void write_to_AMD_PERFEVTSELi(int fd, uint8_t i, uint64_t val) {
     int rv = 0;
 
@@ -65,6 +73,19 @@ uint64_t read_AMD_PMCi(int fd, uint8_t i) {
     }
 
     return ret;
+}
+
+/**
+ * Read all performance counters into the destination array.
+ *
+ * @param fd The file descriptor
+ * @param dest The destination array into which to write the results
+ * @param nb_counters The total number of counters
+ */
+void read_AMD_PMC(int fd, uint64_t *dest, int nb_counters) {
+  for (int i = 0; i < nb_counters; ++i) {
+    dest[i] = read_AMD_PMCi(fd, i);
+  }
 }
 
 #endif // AMD_H

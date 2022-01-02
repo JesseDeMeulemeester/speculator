@@ -11,6 +11,10 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+#
+# 2022-01-02: Modified by Jesse De Meulemeester.
+#   - Added support for ARM processors
+#   - Changed vendor detection to use lscpu
 
 cmake_minimum_required (VERSION 3.1)
 project (SPECULATOR VERSION 1.2.0 LANGUAGES C ASM)
@@ -20,10 +24,11 @@ cmake_policy(SET CMP0048 NEW)
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include)
 
 message(STATUS "Quering CPU type")
-execute_process (COMMAND cat /proc/cpuinfo
-                 COMMAND grep vendor_id
+execute_process (COMMAND lscpu
+                 COMMAND grep "Vendor ID"
                  COMMAND head -n 1
-                 COMMAND cut -d " " -f 2
+                 COMMAND sed "s/ //g"
+                 COMMAND cut -d ":" -f 2
                  OUTPUT_VARIABLE VENDOR
                  OUTPUT_STRIP_TRAILING_WHITESPACE)
 message(STATUS "CPU Detected -- ${VENDOR}")
@@ -35,6 +40,9 @@ IF (NOT EXISTS speculator.json)
     ELSEIF(${VENDOR} STREQUAL "GenuineIntel")
         configure_file(${CMAKE_CURRENT_SOURCE_DIR}/confs/speculator.json.intel.template ${CMAKE_CURRENT_SOURCE_DIR}/speculator.json @ONLY)
         message (STATUS "Generated default Intel counters config file")
+    ELSEIF(${VENDOR} STREQUAL "ARM")
+        configure_file(${CMAKE_CURRENT_SOURCE_DIR}/confs/speculator.json.arm.template ${CMAKE_CURRENT_SOURCE_DIR}/speculator.json @ONLY)
+        message (STATUS "Generated default ARM counters config file")
     ELSE()
         message(FATAL_ERROR "CPU not yet supported: ${VENDOR}")
     ENDIF()
@@ -76,6 +84,14 @@ ELSEIF (${VENDOR} STREQUAL "GenuineIntel")
         COMMAND ${CMAKE_COMMAND} -E create_symlink
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/include/x86/signals.inc
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/signals.inc
+        )
+
+ELSEIF (${VENDOR} STREQUAL "ARM")
+    message(STATUS "Generating templates header for " ${VENDOR})
+    execute_process(
+        COMMAND ${CMAKE_COMMAND} -E create_symlink
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests/include/aarch64/common.inc.in
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests/common.inc.in
         )
 
 ENDIF()

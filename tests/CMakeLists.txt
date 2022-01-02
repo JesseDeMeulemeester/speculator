@@ -11,13 +11,21 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+#
+# 2022-01-02: Modified by Jesse De Meulemeester.
+#   - Added support for ARM processors
 
 cmake_minimum_required (VERSION 2.6)
 
-enable_language(ASM_NASM)
-if (CMAKE_ASM_NASM_COMPILER_LOADED)
+IF (${VENDOR} STREQUAL "GenuineIntel" OR ${VENDOR} STREQUAL "AuthenticAMD")
+    enable_language(ASM_NASM)
+    if (CMAKE_ASM_NASM_COMPILER_LOADED)
+        set(CAN_USE_ASSEMBLER TRUE)
+    endif(CMAKE_ASM_NASM_COMPILER_LOADED)
+ELSE ()
+    enable_language(ASM)
     set(CAN_USE_ASSEMBLER TRUE)
-endif(CMAKE_ASM_NASM_COMPILER_LOADED)
+ENDIF()
 
 # Information for libc
 set(LIBC

@@ -11,6 +11,9 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+#
+# 2022-01-02: Modified by Jesse De Meulemeester.
+#   - Added support for ARM processors
 
 cmake_minimum_required (VERSION 3.1)
 
@@ -23,6 +26,8 @@ IF (${VENDOR} STREQUAL "AuthenticAMD")
     target_compile_definitions(speculator_mon PRIVATE AMD)
 ELSEIF (${VENDOR} STREQUAL "GenuineIntel")
     target_compile_definitions(speculator_mon PRIVATE INTEL)
+ELSEIF (${VENDOR} STREQUAL "ARM")
+    target_compile_definitions(speculator_mon PRIVATE ARM)
 ENDIF()
 
 # Add link options for speculator_mon
