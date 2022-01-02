@@ -1,0 +1,77 @@
+{
+    "victim": {
+        "0": {
+            "name" : "r011",
+            "description" : "CPU_CYCLES: The number of CPU cycles elapsed",
+            "mask" : ""
+        },
+
+        "1": {
+            "name" : "r008",
+            "description" : "INST_RETIRED: Instructions architecturally executed",
+            "mask" : ""
+        },
+
+        "2": {
+            "name" : "r01b",
+            "description" : "INST_SPEC: Instructions speculatively executed",
+            "mask" : ""
+        },
+
+        "3": {
+            "name" : "r012",
+            "description" : "BR_PRED: Predictable branch speculatively executed",
+            "mask" : ""
+        },
+
+        "4": {
+            "name" : "r010",
+            "description" : "BR_MIS_PRED: Mispredicted or not predicted branch speculatively executed",
+            "mask" : ""
+        },
+
+        "5": {
+            "name" : "r075",
+            "description" : "VFP_SPEC: Floating point operations speculatively executed",
+            "mask" : ""
+        }
+    },
+
+    "attacker": {
+        "0": {
+            "name" : "r011",
+            "description" : "CPU_CYCLES: The number of CPU cycles elapsed",
+            "mask" : ""
+        },
+
+        "1": {
+            "name" : "r008",
+            "description" : "INST_RETIRED: Instructions architecturally executed",
+            "mask" : ""
+        },
+
+        "2": {
+            "name" : "r01b",
+            "description" : "INST_SPEC: Instructions speculatively executed",
+            "mask" : ""
+        },
+
+        "3": {
+            "name" : "r012",
+            "description" : "BR_PRED: Predictable branch speculatively executed",
+            "mask" : ""
+        },
+
+        "4": {
+            "name" : "r010",
+            "description" : "BR_MIS_PRED: Mispredicted or not predicted branch speculatively executed",
+            "mask" : ""
+        },
+
+        "5": {
+            "name" : "r075",
+            "description" : "VFP_SPEC: Floating point operations speculatively executed",
+            "mask" : ""
+        }
+    }
+}

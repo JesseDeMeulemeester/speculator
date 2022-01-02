@@ -11,6 +11,13 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+//
+// 2022-01-02: Modified by Jesse De Meulemeester.
+//   - Added support for ARM processors
+//       - Moved code to open msr device to include/x86.h
+//       - Generalized reading and resetting all counters
+//   - Fixed some small typos
+//   - Changed formatting in case the counter does not have a mask
 
 #include <time.h>
 #include <stdio.h>
@@ -22,6 +29,7 @@
 #include <sched.h>
 #include <errno.h>
 #include <string.h>
+#include <inttypes.h>
 
 #include <sys/wait.h>
 #include <sys/mman.h>
@@ -59,8 +67,12 @@ init_result_file(char *output_filename, int is_attacker) {
         fprintf(o_fd, "%s|", intel_fixed_counters[i]);
 #endif // INTEL
 
-    for (int i = 0; i < data->free; ++i)
-        fprintf (o_fd, "%s.%s|", data->key[i], data->mask[i]);
+    for (int i = 0; i < data->free; ++i) {
+        if (data->mask[i][0] != '\0')
+            fprintf(o_fd, "%s.%s|", data->key[i], data->mask[i]);
+        else
+            fprintf(o_fd, "%s|", data->key[i]);
+    }
 
     fprintf(o_fd,"\n");
     fclose(o_fd);
@@ -99,12 +111,12 @@ start_process(char *filename,
     sem_wait(sem);
     sem_post(sem);
 
-    /* HERE TRY TO START  OTHER PROCESS */
+    /* HERE TRY TO START OTHER PROCESS */
     execve(filename, par, env);
 }
 
 void
-set_counters(int msr_fd, int is_attacker) {
+set_counters(int fd, int is_attacker) {
     struct speculator_monitor_data *data;
 
     data = &victim_data;
@@ -115,24 +127,24 @@ set_counters(int msr_fd, int is_attacker) {
 
 #ifdef INTEL
     // Disable all counters
-    write_to_IA32_PERF_GLOBAL_CTRL(msr_fd, 0ull);
+    write_to_IA32_PERF_GLOBAL_CTRL(fd, 0ull);
     // Initialize Fixed Counters
-    write_to_IA32_FIXED_CTR_CTRL(msr_fd, (2ull) | (2ull << 4) | (2ull << 8));
+    write_to_IA32_FIXED_CTR_CTRL(fd, (2ull) | (2ull << 4) | (2ull << 8));
     /* Reset fixed counters */
     for (int i = 0; i < 3; ++i)
-        write_to_IA32_FIXED_CTRi(msr_fd, i, 0ull);
+        write_to_IA32_FIXED_CTRi(fd, i, 0ull);
 #endif // INTEL
 
+#if defined(INTEL) || defined(AMD)
     // select counters
     for (int i = 0; i < data->free; ++i)
-        write_perf_event_select(msr_fd, i, data->config[i]);
+        write_perf_event_select(fd, i, data->config[i]);
+#endif
 
-    // reset counters
-    for (int i = 0; i < data->free; ++i)
-        write_perf_event_counter(msr_fd, i, 0ull);
+    reset_perf_event_counters(fd, data->free);
 }
 
-void dump_results(char *output_filename, int msr_fd, int is_attacker) {
+void dump_results(char *output_filename, int fd, int is_attacker) {
     FILE *fp = NULL;
     struct speculator_monitor_data *data;
 
@@ -142,7 +154,7 @@ void dump_results(char *output_filename, int msr_fd, int is_attacker) {
         data = &attacker_data;
     }
 
-    fp = fopen (output_filename, "a+");
+    fp = fopen(output_filename, "a+");
 
     if (fp == NULL) {
         fprintf(stderr, "Impossible to open the outputfile %s\n", output_filename);
@@ -151,22 +163,26 @@ void dump_results(char *output_filename, int msr_fd, int is_attacker) {
 
 #ifdef INTEL
     for (int i = 0; i < 3; ++i) {
-        data->count_fixed[i] = read_IA32_FIXED_CTRi(msr_fd, i);
+        data->count_fixed[i] = read_IA32_FIXED_CTRi(fd, i);
         fprintf(fp, "%lld|", data->count_fixed[i]);
     }
 #endif // INTEL
 
+    read_perf_event_counters(fd, data->count, data->free);
+
     for (int i = 0; i < data->free; ++i) {
-        data->count[i] = read_perf_event_counter(msr_fd, i);
         if (verbflag) {
-            printf ("######## %s:%s ##########\n", data->key[i], data->mask[i]);
-            debug_print ("Counter full: %s\n", data->config_str[i]);
-            debug_print ("Counter hex: %llx\n", data->config[i]);
-            debug_print ("Desc: %s\n", data->desc[i]);
-            printf ("Result: %lld\n", data->count[i]);
-            debug_print ("-----------------\n");
+            if (data->mask[i][0] != '\0')
+                printf("######## %s:%s ##########\n", data->key[i], data->mask[i]);
+            else
+                printf("######## %s ##########\n", data->key[i]);
+            debug_print("Counter full: %s\n", data->config_str[i]);
+            debug_print("Counter hex: %llx\n", data->config[i]);
+            debug_print("Desc: %s\n", data->desc[i]);
+            printf("Result: %" PRIu64 "\n", data->count[i]);
+            debug_print("-----------------\n");
         }
-        fprintf(fp, "%lld|", data->count[i]);
+        fprintf(fp, "%" PRIu64 "|", data->count[i]);
     }
 
     fprintf(fp, "\n");
@@ -179,14 +195,14 @@ start_monitor_inline(int victim_pid,
                      int attacker_pid,
                      char* output_filename,
                      char* output_filename_attacker,
-                     int msr_fd_victim,
-                     int msr_fd_attacker) {
+                     int fd_victim,
+                     int fd_attacker) {
     int status = 0;
 
     if (!mflag) { // Set counters unless monitor-only mode
-        set_counters(msr_fd_victim, 0);
+        set_counters(fd_victim, 0);
         if (aflag && ATTACKER_CORE != VICTIM_CORE)
-            set_counters(msr_fd_attacker, 1);
+            set_counters(fd_attacker, 1);
     }
 
     if (aflag && !iflag) {
@@ -222,7 +238,7 @@ start_monitor_inline(int victim_pid,
     }
 
     if (!mflag) { // Skip dump result if monitor-only
-        dump_results(output_filename, msr_fd_victim, 0);
+        dump_results(output_filename, fd_victim, 0);
     }
 
     if (aflag) {
@@ -230,7 +246,7 @@ start_monitor_inline(int victim_pid,
             waitpid(attacker_pid, &status, 0);
         }
         if (!mflag) { // Skip dump result if monitor-only
-            dump_results(output_filename_attacker, msr_fd_attacker, 1);
+            dump_results(output_filename_attacker, fd_attacker, 1);
         }
     }
 }
@@ -243,17 +259,15 @@ main(int argc, char **argv) {
     int option_index = 0;
     pid_t victim_pid = 0;
     char *env_home = NULL;
-    int msr_fd_victim = 0;
+    int fd_victim = -1;
     char *env_build = NULL;
     pid_t attacker_pid = 0;
-    int msr_fd_attacker = 0;
+    int fd_attacker = -1;
     char *env_install = NULL;
     int repeat = DEFAULT_REPEAT;
     char *config_filename = NULL;
     char *output_filename = NULL;
-    char *msr_path_victim = NULL;
     char *victim_filename = NULL;
-    char *msr_path_attacker = NULL;
     char *attacker_filename = NULL;
     char *output_filename_attacker = NULL;
 
@@ -262,33 +276,39 @@ main(int argc, char **argv) {
     if (env_home == NULL)
         debug_print("WARNING: SPEC_H not set\n");
     else
-        debug_print("SPEC_H set to %s", env_home);
+        debug_print("SPEC_H set to %s\n", env_home);
 
     env_build = getenv("SPEC_B");
     if (env_build == NULL)
         debug_print("WARNING: SPEC_B not set\n");
     else
-        debug_print("SPEC_B set to %s", env_build);
+        debug_print("SPEC_B set to %s\n", env_build);
 
     env_install = getenv("SPEC_I");
     if (env_install == NULL)
         debug_print("WARNING: SPEC_I not set\n");
     else
-        debug_print("SPEC_I set to %s", env_install);
+        debug_print("SPEC_I set to %s\n", env_install);
 
 #ifdef INTEL
     debug_print("CPU: Intel detected\n");
     write_perf_event_select = write_to_IA32_PERFEVTSELi;
-    write_perf_event_counter = write_to_IA32_PMCi;
-    read_perf_event_counter = read_IA32_PMCi;
+    read_perf_event_counters = read_IA32_PMCs;
+    reset_perf_event_counters = reset_IA32_PMCs;
 #endif // INTEL
 
 #ifdef AMD
     debug_print("CPU: AMD detected\n");
     write_perf_event_select = write_to_AMD_PERFEVTSELi;
-    write_perf_event_counter = write_to_AMD_PMCi;
-    read_perf_event_counter = read_AMD_PMCi;
+    read_perf_event_counters = read_AMD_PMCs;
+    reset_perf_event_counters = reset_AMD_PMCs;
 #endif // AMD
+
+#ifdef ARM
+    debug_print("CPU: ARM detected\n");
+    read_perf_event_counters = read_ARM_PMCs;
+    reset_perf_event_counters = reset_ARM_PMCs;
+#endif // ARM
 
     // Set process to run on the first core to don't interfere on child process
     CPU_ZERO(&set);
@@ -418,7 +438,7 @@ main(int argc, char **argv) {
 
     if(!mflag && geteuid() != 0) {
         fprintf (stderr, "This program must run as root " \
-                         "to be able to open msr device\n");
+                         "to be able to read the performance counters\n");
         exit(EXIT_FAILURE);
     }
 
@@ -466,40 +486,49 @@ main(int argc, char **argv) {
             init_result_file(output_filename_attacker, 1);
         }
 
-        // Opening cpu msr file for the victim cpu
-        msr_path_victim = (char *) malloc(sizeof(char) * (strlen(MSR_FORMAT)+1));
-        snprintf (msr_path_victim, strlen(MSR_FORMAT)+1, MSR_FORMAT, VICTIM_CORE);
+#ifdef ARM
+        // Setting up the performance counters for the victim
+        struct speculator_monitor_data *data;
+        data = &victim_data;
+        for (int i = 0; i < data->free; ++i) 
+            fd_victim = ARM_setup_perf_counter(fd_victim, data->config[i], VICTIM_CORE);
 
-        debug_print("Opening %s device for victim\n", msr_path_victim);
-
-        // Get fd to MSR register
-        msr_fd_victim = open(msr_path_victim, O_RDWR | O_CLOEXEC);
-
-        if (msr_fd_victim < 0) {
-            fprintf(stderr, "Impossible to open the %s device\n", msr_path_victim);
-            free(msr_path_victim);
-            exit(EXIT_FAILURE);
+        // Setting up the performance counters for the attacker
+        // if running in attacker/victim mode
+        if (aflag) {
+            data = &attacker_data;
+            for (int i = 0; i < data->free; ++i) 
+                fd_attacker = ARM_setup_perf_counter(fd_attacker, data->config[i], ATTACKER_CORE);
         }
 
-        free(msr_path_victim);
+        // Placing the file descriptors in the parameters so the victim can
+        // retrieve the file descriptor to start and stop the counters.
+        char fd_victim_str[20];
+        char fd_attacker_str[20];
+
+        sprintf(fd_victim_str, "group_fd=%d", fd_victim);
+        sprintf(fd_attacker_str, "group_fd=%d", fd_attacker);
+
+        index = -1;
+        while (victim_preload[++index] != NULL);
+        printf("Index of fd: %d\n", index);
+        victim_preload[index] = fd_victim_str;
+
+        index = -1;
+        while (attacker_preload[++index] != NULL);
+        attacker_preload[index] = fd_attacker_str;
+#endif
+
+#if defined(INTEL) || defined(AMD)
+        // Opening cpu msr file for the victim cpu
+        fd_victim = get_msr_fd(VICTIM_CORE);
 
         // Opening cpu msr file for the attacker cpu
         // if running in attacker/victim mode
         if (aflag) {
-            msr_path_attacker = (char *) malloc(sizeof(char) * (strlen(MSR_FORMAT)+1));
-            snprintf (msr_path_attacker, strlen(MSR_FORMAT)+1, MSR_FORMAT, ATTACKER_CORE);
-            debug_print("Opening %s device for attacker\n", msr_path_attacker);
-
-            msr_fd_attacker = open(msr_path_attacker, O_RDWR | O_CLOEXEC);
-
-            if(msr_fd_attacker < 0) {
-                fprintf(stderr, "Impossible to open the %s device\n", msr_path_attacker);
-                free(msr_path_attacker);
-                exit(EXIT_FAILURE);
-            }
-
-            free(msr_path_attacker);
+            fd_attacker = get_msr_fd(ATTACKER_CORE);
         }
+#endif
     }
     // Repeat X times experiment
     for (int i = 0; i < repeat; ++i) {
@@ -556,8 +585,7 @@ main(int argc, char **argv) {
             start_process(victim_filename, VICTIM_CORE, sem_victim,  victim_preload, victim_parameters);
 
         start_monitor_inline(victim_pid, attacker_pid, output_filename,
-                    output_filename_attacker, msr_fd_victim,
-                    msr_fd_attacker);
+                    output_filename_attacker, fd_victim, fd_attacker);
     }
 
     if (!mflag) { // Skip change ownership if in monitor-only mode
@@ -585,16 +613,16 @@ main(int argc, char **argv) {
 #ifdef INTEL
     if (!mflag) { // Skip re-enabling if in monitor-only mode
         // RE-ENABLE ALL COUNTERS
-        write_to_IA32_PERF_GLOBAL_CTRL(msr_fd_victim, 15ull | (7ull << 32));
+        write_to_IA32_PERF_GLOBAL_CTRL(fd_victim, 15ull | (7ull << 32));
         if (aflag)
-            write_to_IA32_PERF_GLOBAL_CTRL(msr_fd_attacker, 15ull | (7ull << 32));
+            write_to_IA32_PERF_GLOBAL_CTRL(fd_attacker, 15ull | (7ull << 32));
     }
 #endif //INTEL
 
-    close(msr_fd_victim);
+    close(fd_victim);
 
     if (aflag) {
-        close(msr_fd_attacker);
+        close(fd_attacker);
         free(output_filename_attacker);
     }
 

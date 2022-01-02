@@ -11,6 +11,11 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+//
+// 2022-01-02: Modified by Jesse De Meulemeester.
+//   - Moved x86 specific functions and structures to seperate file.
+//   - Changed type of counter from long long to uint64_t.
+//   - Fixed initialization of victim_data and attacker_data.
 
 #ifndef SPECULATOR_H
 #define SPECULATOR_H
@@ -32,11 +37,17 @@
 
 #ifdef INTEL
     #include "intel.h"
-#endif //INTEL
+    #include "x86.h"
+#endif // INTEL
 
 #ifdef AMD
     #include "amd.h"
-#endif //AMD
+    #include "x86.h"
+#endif // AMD
+
+#ifdef ARM
+    #include "arm.h"
+#endif // ARM
 
 /**** SPECULATOR CONSTANTS ****/
 #define N_COUNTERS 8
@@ -68,7 +79,6 @@
                      "  --verbose \t\tenables verbose mode\n" \
                      "  --help/-h \t\tprints this message\n" \
 
-#define MSR_FORMAT "/dev/cpu/%ld/msr"
 #define FATHER_CORE sysconf(_SC_NPROCESSORS_ONLN) - 1
 
 #if DEBUG
@@ -79,22 +89,9 @@
 
 // function pointers for different platforms
 void (*write_perf_event_select)(int fd, uint8_t i, uint64_t val);
-void (*write_perf_event_counter)(int fd, uint8_t i, uint64_t val);
-uint64_t (*read_perf_event_counter)(int fd, uint8_t i);
+void (*read_perf_event_counters)(int fd, uint64_t *dest, int nb_counters);
+void (*reset_perf_event_counters)(int fd, int nb_counters);
 
-typedef struct cpuinfo {
-    uint32_t eax;
-    uint32_t ebx;
-    uint32_t edx;
-    uint32_t ecx;
-} cpuinfo;
-
-void cpuid(uint32_t idx, cpuinfo *info) {
-    asm volatile("cpuid"
-            : "=a" (info->eax), "=b" (info->ebx),
-              "=c" (info->ecx), "=d" (info->edx)
-            : "a" (idx));
-}
 
 /**** SPECULATOR DATA STRUCTURES ****/
 // Main speculator data structure
@@ -104,9 +101,9 @@ struct speculator_monitor_data {
     char* mask[N_COUNTERS];
     char* config_str[N_COUNTERS];
     long long config[N_COUNTERS];
-    long long count[N_COUNTERS];
+    uint64_t count[N_COUNTERS];
 #ifdef INTEL
-    long long count_fixed[FIXED_COUNTERS];
+    uint64_t count_fixed[FIXED_COUNTERS];
 #endif // INTEL
     int free;
     long long prev_head;
@@ -160,12 +157,18 @@ static sem_t *sem_victim = NULL;
 static sem_t *sem_attacker = NULL;
 
 static struct speculator_monitor_data
-victim_data = {{NULL}, {NULL}, {NULL}, {NULL},
-        {0}, {0}, {0}, 0, 0};
+victim_data = {{NULL}, {NULL}, {NULL}, {NULL}, {0}, {0},
+#ifdef INTEL
+        {0},
+#endif
+        0, 0};
 
 static struct speculator_monitor_data
-attacker_data = {{NULL}, {NULL}, {NULL}, {NULL},
-        {0}, {0}, {0}, 0, 0};
+attacker_data = {{NULL}, {NULL}, {NULL}, {NULL}, {0}, {0},
+#ifdef INTEL
+         {0},
+#endif
+         0, 0};
 
 void
 update_file_owner(char *filename) {
